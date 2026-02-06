@@ -1,15 +1,18 @@
 <script setup>
 import { computed } from 'vue'
 import router from '@/router'
+import pageLayout from './Layouts/pageLayout.vue'
 
-const hasToken = computed(() => typeof localStorage !== 'undefined' && !!localStorage.getItem('token'))
+const hasToken = computed(() => typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('token'))
 
 function logout() {
-  localStorage.removeItem('token')
+  sessionStorage.removeItem('token')
   router.push('/connexion')
 }
 </script>
 
 <template>
-  <RouterView />
+  <pageLayout>
+    <router-view />
+  </pageLayout>
 </template>

@@ -8,6 +8,29 @@ const selectedValue = ref('')
 const componentKey = ref('')
 const renderComponent = ref()
 
+function hasEfiValue(row) {
+    if (!row || typeof row !== 'object') return false
+    const fields = [
+        'brut_solde_n',
+        'amor_solde_n',
+        'net_solde_n',
+        'net_solde_n1',
+        'solde_n',
+        'solde_n1'
+    ]
+    return fields.some((key) => {
+        const val = row[key]
+        if (val === null || val === undefined || val === '') return false
+        const num = Number(val)
+        return !Number.isNaN(num) && num !== 0
+    })
+}
+
+function filterEfiRows(rows) {
+    if (!Array.isArray(rows)) return []
+    return rows.filter(hasEfiValue)
+}
+
 function showComp(type) {
     let vnode;
     selectedValue.value = type
@@ -22,7 +45,7 @@ function showComp(type) {
 
     if (type === 'actif') {
         const subProps = {
-            efiActif: props.data?.efi?.actif || [],
+            efiActif: filterEfiRows(props.data?.efi?.actif),
             annee_auditee: props.data?.annee_auditee
         }
         console.log('📊 EfiComponent - Passage à ActifComponent:', subProps);
@@ -30,7 +53,7 @@ function showComp(type) {
         vnode = h(ActifComponent, subProps)
     } else if (type === 'passif') {
         const subProps = {
-            efiPassif: props.data.efi.passif || [],
+            efiPassif: filterEfiRows(props.data?.efi?.passif),
             annee_auditee: props.data.annee_auditee
         }
         console.log('📊 EfiComponent - Passage à PassifComponent:', subProps);
@@ -41,7 +64,7 @@ function showComp(type) {
         vnode = h(PassifComponent, subProps)
     } else if (type === 'pnl') {
         const subProps = {
-            efiPnl: props.data.efi.pnl || [],
+            efiPnl: filterEfiRows(props.data?.efi?.pnl),
             annee_auditee: props.data.annee_auditee
         }
         vnode = h(PnlComponent, subProps)

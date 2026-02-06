@@ -1,48 +1,76 @@
-import axios from 'axios';
+import axios from 'axios'
 
-export async function uploadFile(annee_auditee, balances, date_debut, date_fin, id_client) {
-    const config = {
-        baseURL: 'http://localhost:5000/cors'
-        // Ne pas fixer Content-Type; axios gère le boundary multipart
-    };
+export async function uploadFile(
+  annee_auditee,
+  balances,
+  date_debut,
+  date_fin,
+  date_debut_mandat,
+  date_fin_mandat,
+  id_client
+) {
+  const formData = new FormData()
 
-    const formData = new FormData();
+  // 🔹 fichiers
+  const validFiles = (balances || []).filter(
+    f => f && (f.name || f.size !== undefined)
+  )
 
-    // N'envoyer que de vrais fichiers (ignorer les placeholders "")
-    const validFiles = (balances || []).filter(f => !!f && (f.name || f.size !== undefined));
-    validFiles.forEach(f => formData.append('files[]', f));
+  validFiles.forEach(file => {
+    formData.append('files[]', file)
+  })
 
-    formData.append('annee_auditee', annee_auditee);
-    formData.append('date_debut', date_debut);
-    formData.append('date_fin', date_fin);
-    formData.append('id', id_client);
+  // 🔹 champs EXACTS attendus par le backend
+  formData.append('annee_auditee', String(annee_auditee)) // ⚠️ forcer string
+  formData.append('id_client', id_client)
+  formData.append('date_debut', date_debut)
+  formData.append('date_fin', date_fin)
+  formData.append('date_debut_mandat', date_debut_mandat)
+  formData.append('date_fin_mandat', date_fin_mandat)
 
-    let isUploaded = null;
-
+  const user = (() => {
     try {
-        console.log("Envoi de la requête vers:", `/mission/nouvelle_mission`);
-        console.log("FormData contenu:", {
-            annee_auditee: formData.get('annee_auditee'),
-            date_debut: formData.get('date_debut'),
-            date_fin: formData.get('date_fin'),
-            id: formData.get('id'),
-            fichiers: validFiles.map(f => f.name)
-        });
-        
-        const response = await axios.post(`/mission/nouvelle_mission`, formData, config);
-        
-        if (response.status === 200) {
-            if (response.data.success) {
-                isUploaded = response.data.data;
-            } else {
-                throw new Error(response.data.error || "Erreur inconnue");
-            }
+      return JSON.parse(sessionStorage.getItem('user') || 'null')
+    } catch {
+      return null
+    }
+  })()
+
+  if (user) {
+    const nom = `${user.firstname || ''} ${user.lastname || ''}`.trim()
+    if (nom) formData.append('responsable_nom', nom)
+    if (user.grade) formData.append('responsable_grade', user.grade)
+    if (user.role) formData.append('responsable_role', user.role)
+    if (user._id) formData.append('responsable_id', user._id)
+  }
+
+  // 🧪 DEBUG
+  console.log('📦 FormData envoyé :')
+  for (let pair of formData.entries()) {
+    console.log(pair[0], pair[1])
+  }
+
+  try {
+    const response = await axios.post(
+      'http://localhost:5000/api/v1/missions',
+      formData,
+      {
+        headers: {
+          // ❌ NE PAS mettre multipart à la main
+          // axios le gère automatiquement
         }
-    } catch (error) {
-        console.error("Erreur lors de l'upload:", error);
-        const msg = error?.response?.data?.error || error?.response?.data?.message || error.message || "Erreur réseau";
-        alert(`Erreur: ${msg}`);
+      }
+    )
+
+    // ✅ NORMALISATION
+    if (response.data?.success === true) {
+      return response.data.data
     }
 
-    return isUploaded;
+    throw new Error(response.data?.message || 'Erreur inconnue serveur')
+  } catch (error) {
+    console.error('❌ Erreur upload mission:', error)
+    console.error('📨 Réponse serveur:', error?.response?.data)
+    throw error
+  }
 }

@@ -6,6 +6,12 @@ import vue from '@vitejs/plugin-vue'
  
 // https://vitejs.dev/config/
 export default defineConfig({
+  server: {
+    watch: {
+      usePolling: true,   // force Vite à surveiller les fichiers par polling (utile sur WSL/Windows)
+      interval: 100
+    }
+  },
   plugins: [
     tailwindcss,
     vue(),

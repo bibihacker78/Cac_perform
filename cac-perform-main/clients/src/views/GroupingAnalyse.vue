@@ -1,18 +1,58 @@
 <script setup>
 import { ref, h, inject, onMounted, computed, watch, nextTick } from 'vue';
+import { useRoute } from 'vue-router';
 import GroupingComponent from '@/components/GroupingComponent.vue';
 import EfiComponent from '@/components/EfiComponent.vue';
 import router from "@/router";
 
 
 const axios = inject('axios');
+const route = useRoute();
 
-const props = defineProps(['missionId']);
+const props = defineProps(['missionId', 'grouping']);
 
 const componentKey = ref('');
 const renderComponent = ref();
 const infoMission = ref();
 const selectBtn = ref(null);              // <- remplace activeStep
+
+// Recuperer l'id mission dans l'URL
+const id_mission = window.location.pathname.split('/')[2]
+
+const groupingData = ref(null)
+const anneeAuditee = ref(null)
+
+function normalizeYear(value) {
+  const year = parseInt(value, 10)
+  return Number.isNaN(year) ? null : year
+}
+
+const effectiveYear = computed(() => {
+  return (
+    normalizeYear(anneeAuditee.value) ??
+    normalizeYear(route.query?.annee) ??
+    normalizeYear(infoMission.value?.annee_auditee?.[0] ?? infoMission.value?.annee_auditee)
+  );
+});
+
+async function loadGrouping() {
+  try {
+    const res = await axios.get(`/mission/make_final/${id_mission}`);
+
+    console.log("API DATA 👉", res.data);
+
+    groupingData.value = res.data?.grouping
+      ? { grouping: res.data.grouping }
+      : null;
+
+    anneeAuditee.value = normalizeYear(
+      res.data?.annee_auditee ??
+      infoMission.value?.annee_auditee?.[0]
+    );
+  } catch (err) {
+    console.error("Erreur chargement grouping", err);
+  }
+}
 
 /* === Nouveaux états pour les 3 features === */
 const revueAnalytique = ref([]);
@@ -107,6 +147,22 @@ const loading = ref(false);
 const errorMsg = ref("");
 const expandedRows = ref([]);
 
+function hasBalanceValues(item) {
+  if (!item || typeof item !== 'object') return false;
+  const fields = ['solde_n', 'solde_n1', 'variation'];
+  return fields.some((key) => {
+    const val = item[key];
+    if (val === null || val === undefined || val === '') return false;
+    const num = Number(val);
+    return !Number.isNaN(num) && num !== 0;
+  });
+}
+
+function filterByBalanceRows(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(hasBalanceValues);
+}
+
 // Variables réactives pour les statistiques
 const qualitativeStats = ref({
   significant_accounts: 0,
@@ -154,7 +210,7 @@ const workflowPhases = ref([
     label: 'Phase 3 – Conclusion',
     open: false,
     steps: [
-      { id: 9, name: "Revue analytique finale", key: "revue", checked: false, static: true }
+      { id: 9, name: "Revue analytique finale", key: "revue", checked: false, static: false }
     ]
   }
 ]);
@@ -199,9 +255,30 @@ const currentStep = ref(1); // Commencer à l'étape 1 (contrôle de cohérence)
 
 
 onMounted(async () => {
-  const result = (await axios.get(`/mission/affichage_infos_mission/${props.missionId}`)).data.response;
-  infoMission.value = result;
+  const result = (await axios.get(`/mission/affichage_infos_mission/${id_mission}`)).data.response;
+  infoMission.value = typeof result === 'object' ? result : null;
+  console.log("infoooo:", infoMission.value);
 });
+
+watch(
+  () => infoMission.value,
+  (val) => {
+    if (!anneeAuditee.value) {
+      anneeAuditee.value = normalizeYear(val?.annee_auditee?.[0] ?? val?.annee_auditee);
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => route.query?.annee,
+  (val) => {
+    if (!anneeAuditee.value) {
+      anneeAuditee.value = normalizeYear(val);
+    }
+  },
+  { immediate: true }
+);
 
 /* === Workflow libre - toutes les étapes accessibles === */
 
@@ -250,7 +327,7 @@ async function loadRevueAnalytique() {
   loading.value = true; errorMsg.value = "";
   try {
     const { data } = await axios.get(`/mission/revue_analytique/${props.missionId}`);
-    revueAnalytique.value = data.response || [];
+    revueAnalytique.value = filterByBalanceRows(data.response || []);
   } catch (e) {
     errorMsg.value = "Échec du chargement de la revue analytique.";
     console.error(e);
@@ -265,7 +342,19 @@ async function loadCoherence() {
     console.log("🔍 Tentative de chargement du contrôle de cohérence pour mission:", props.missionId);
     const { data } = await axios.get(`/mission/controle_coherence/${props.missionId}`);
     console.log("📊 Réponse reçue:", data);
-    coherenceReport.value = data.response || {};
+    const raw = data?.data || [];
+
+    const formatted = {};
+    raw.forEach(item => {
+      if (item.annee && item.rapport) {
+        formatted[item.annee] = item.rapport;
+      }
+    });
+
+    coherenceReport.value = formatted;
+
+    console.log("✅ Rapport cohérence formaté:", coherenceReport.value);
+
     // Marquer l'étape comme complétée si des données sont présentes
     if (coherenceReport.value && Object.keys(coherenceReport.value).length > 0) {
       console.log("✅ Contrôle de cohérence chargé avec succès");
@@ -426,7 +515,8 @@ function showComponent(type) {
 
   // 1️⃣ Onglets historiques (Groupement & États financiers)
   if (type === "grouping") {
-    renderComponent.value = h(GroupingComponent, subProps);
+    renderComponent.value = null;
+    loadGrouping();
     return;
   }
 
@@ -466,9 +556,6 @@ function showComponent(type) {
     case "coherence":
       loadCoherence();
       break;
-    case "grouping":
-      loadGrouping();
-      break;
     case "intang":
       loadIntangibilite();
       break;
@@ -477,12 +564,6 @@ function showComponent(type) {
       break;
     case "materialite":
       loadMaterialite();
-      break;
-    case "quantitatif":
-      loadAnalyseQuantitative();
-      break;
-    case "qualitatif":
-      loadQualitatif();
       break;
     case "presentation":
       loadPresentationComptesSignificatifs();
@@ -674,35 +755,54 @@ async function validerSeuil() {
 }
 
 async function applySeuil(benchmark) {
-  loading.value = true; errorMsg.value = "";
+  loading.value = true;
+  errorMsg.value = "";
+
   try {
     console.log("🔍 Application du seuil:", benchmark);
-    const field = {
-      "benchmark": benchmark
-    };
-    const response = await axios.put(`/mission/validate_materiality/${props.missionId}`, field);
 
-    if (response.data['response'] === 1) {
-      const res = await axios.put(`/mission/quantitative_analysis/${props.missionId}`);
-      console.log("✅ Seuil appliqué au grouping avec succès");
-      console.log("📊 Réponse:", res.data['response']);
+    const field = { benchmark };
+    const response = await axios.put(
+      `/mission/validate_materiality/${props.missionId}`,
+      field
+    );
+
+    // ✅ validate_materiality OK
+    if (response.status === 200) {
+
+      const res = await axios.put(
+        `/mission/quantitative_analysis/${props.missionId}`
+      );
+
+      console.log("✅ Seuil appliqué au grouping");
+      console.log("📊 Lignes modifiées:", res.data.response);
+
+      // même si 0 → ce n’est PAS une erreur
+      errorMsg.value = "";
+
     } else {
-      errorMsg.value = "Échec d'application du seuil au grouping";
+      errorMsg.value = "Impossible de valider le seuil de matérialité";
     }
+
   } catch (e) {
-    errorMsg.value = `Échec d'application du seuil: ${e.message}`;
-    console.error("❌ Erreur lors de l'application du seuil:", e);
+    errorMsg.value = `Erreur lors de l'application du seuil`;
+    console.error("❌ Erreur:", e);
   } finally {
     loading.value = false;
   }
 }
 
+
 async function loadQuantitatif() {
   loading.value = true; errorMsg.value = "";
   try {
     const { data } = await axios.get(`/mission/analyse_quantitative/${props.missionId}`);
-    // Traiter les données quantitatives
-    console.log("Données quantitatives:", data);
+    analyseQuantitativeReport.value = data.response ?? data ?? {};
+    if (analyseQuantitativeReport.value?.analyse) {
+      analyseQuantitativeReport.value.analyse = filterByBalanceRows(analyseQuantitativeReport.value.analyse);
+    }
+    console.log("loadQuantitatiffff:", analyseQuantitativeReport.value);
+    
   } catch (e) {
     errorMsg.value = "Échec du chargement de l'analyse quantitative.";
     console.error(e);
@@ -715,8 +815,11 @@ async function loadQualitatif() {
   loading.value = true; errorMsg.value = "";
   try {
     const { data } = await axios.get(`/mission/analyse_qualitative/${props.missionId}`);
-    analyseQualitativeReport.value = data.response || {};
-
+    analyseQualitativeReport.value = data.response ?? data ?? {};
+    if (analyseQualitativeReport.value?.analyse) {
+      analyseQualitativeReport.value.analyse = filterByBalanceRows(analyseQualitativeReport.value.analyse);
+    }
+    console.log("loadQualitatiiiiif:", analyseQualitativeReport.value);
     // Initialiser les réponses (même si vides)
     if (analyseQualitativeReport.value && analyseQualitativeReport.value.analyse) {
       const responses = {};
@@ -801,6 +904,13 @@ async function loadEtatsFinanciers() {
   try {
     const { data } = await axios.get(`/mission/etats_financiers_preliminaires/${props.missionId}`);
     etatsFinanciersReport.value = data.response || {};
+    const rawYear = etatsFinanciersReport.value?.annee_auditee;
+    let normalizedYear = normalizeYear(rawYear);
+    if (normalizedYear !== null && normalizedYear < 100) {
+      normalizedYear = null;
+    }
+    etatsFinanciersReport.value.annee_auditee =
+      normalizedYear ?? effectiveYear.value ?? etatsFinanciersReport.value?.annee_auditee;
     console.log('📊 loadEtatsFinanciers - Données chargées:', etatsFinanciersReport.value);
     console.log('  - Type:', typeof etatsFinanciersReport.value);
     console.log('  - efi existe?', etatsFinanciersReport.value?.efi ? 'oui' : 'non');
@@ -828,43 +938,11 @@ async function loadEtatsFinanciers() {
 }
 
 async function loadAnalyseQuantitative() {
-  loading.value = true; errorMsg.value = "";
-  try {
-    const { data } = await axios.get(`/mission/analyse_quantitative/${props.missionId}`);
-    analyseQuantitativeReport.value = data.response || {};
-  } catch (e) {
-    errorMsg.value = "Échec du chargement de l'analyse quantitative.";
-    console.error(e);
-  } finally {
-    loading.value = false;
-  }
+  return await loadQuantitatif();
 }
 
 async function loadAnalyseQualitative() {
-  loading.value = true; errorMsg.value = "";
-  try {
-    const { data } = await axios.get(`/mission/analyse_qualitative/${props.missionId}`);
-    analyseQualitativeReport.value = data.response || {};
-
-    // Initialiser les réponses (même si vides)
-    if (analyseQualitativeReport.value && analyseQualitativeReport.value.analyse) {
-      const responses = {};
-      analyseQualitativeReport.value.analyse.forEach(item => {
-        responses[item.compte] = {};
-        // Initialiser toutes les questions Q1-Q8
-        for (let q = 1; q <= 8; q++) {
-          const questionId = `Q${q}`;
-          responses[item.compte][questionId] = item.responses_detail.find(r => r.question_id === questionId)?.response || false;
-        }
-      });
-      qualitativeResponses.value = responses;
-    }
-  } catch (e) {
-    errorMsg.value = "Échec du chargement de l'analyse qualitative.";
-    console.error(e);
-  } finally {
-    loading.value = false;
-  }
+  return await loadQualitatif();
 }
 
 function back() {
@@ -1142,6 +1220,10 @@ async function loadPresentationComptesSignificatifs() {
   try {
     const { data } = await axios.get(`/mission/presentation_comptes_significatifs/${props.missionId}`);
     presentationComptesSignificatifsReport.value = data.response || {};
+    if (presentationComptesSignificatifsReport.value?.presentation) {
+      presentationComptesSignificatifsReport.value.presentation =
+        filterByBalanceRows(presentationComptesSignificatifsReport.value.presentation);
+    }
   } catch (e) {
     errorMsg.value = "Échec du chargement de la présentation des comptes significatifs.";
     console.error(e);
@@ -1155,6 +1237,10 @@ async function loadRevueAnalytiqueFinale() {
   try {
     const { data } = await axios.get(`/mission/revue_analytique_finale/${props.missionId}`);
     revueAnalytiqueFinaleReport.value = data.response || {};
+    if (revueAnalytiqueFinaleReport.value?.revue) {
+      revueAnalytiqueFinaleReport.value.revue =
+        filterByBalanceRows(revueAnalytiqueFinaleReport.value.revue);
+    }
   } catch (e) {
     errorMsg.value = "Échec du chargement de la revue analytique finale.";
     console.error(e);
@@ -1608,7 +1694,7 @@ function formatAmount(value) {
 
 
 <template>
-  <div class="h-screen w-screen flex overflow-auto bg-gray-ycube">
+  <div class="flex w-full overflow-hidden">
     <!-- Sidebar -->
     <!-- SIDEBAR ÉTAPES -->
 <!-- SIDEBAR WORKFLOW PAR PHASES -->
@@ -1720,7 +1806,7 @@ function formatAmount(value) {
           <div v-if="revueAnalytique.length === 0 && !loading" class="text-sm text-gray-600">Aucune donnée.</div>
           <button v-if="revueAnalytique.length" @click="exportToCsv(revueAnalytique, 'revue_analytique')"
             class="mb-3 px-4 py-2 bg-green-ycube text-white rounded-md shadow-md">Télécharger (CSV)</button>
-          <div class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100"
+          <div class="overflow-x-auto rounded-xl shadow-xl bg-white border border-gray-100"
             v-if="revueAnalytique.length">
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gradient-to-r from-blue-ycube  to-blue-ycube-3">
@@ -3279,8 +3365,13 @@ function formatAmount(value) {
           </div>
 
           <!-- Utilisation du composant GroupingComponent existant -->
-          <div v-if="infoMission" class="space-y-4">
-            <component :is="renderComponent" v-if="renderComponent" />
+          <div class="space-y-4">
+            <GroupingComponent
+              v-if="groupingData"
+              :data="groupingData"
+              :annee_auditee="effectiveYear ?? ''"
+            />
+
             <div v-else class="text-sm text-gray-600">
               <p>Le composant de grouping sera chargé ici.</p>
               <p class="mt-2 text-xs text-gray-500">
@@ -3290,259 +3381,7 @@ function formatAmount(value) {
           </div>
         </div>
 
-        <!-- Étape 5: États financiers préliminaires -->
-        <div v-if="componentKey === 'efi'">
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-xl font-semibold">États financiers préliminaires</h2>
-          </div>
-
-          <div v-if="!etatsFinanciersReport && !loading" class="text-sm text-gray-600">Aucune donnée.</div>
-          <div v-else-if="etatsFinanciersReport?.message" class="text-sm text-red-700 mb-3">
-            {{ etatsFinanciersReport.message }}
-          </div>
-
-          <div v-if="etatsFinanciersReport && etatsFinanciersReport.ok" class="space-y-4">
-            <!-- Informations générales -->
-            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 class="text-lg font-semibold text-blue-800 mb-2">États financiers préliminaires</h3>
-              <p class="text-blue-700 text-sm mb-2">{{ etatsFinanciersReport.message }}</p>
-              <p class="text-blue-600 text-xs" v-if="etatsFinanciersReport.annee_auditee">
-                Année audité: {{ etatsFinanciersReport.annee_auditee }}
-              </p>
-            </div>
-
-            <!-- Boutons d'export -->
-            <div class="flex gap-2 mb-3">
-              <button v-if="etatsFinanciersReport.efi?.actif && etatsFinanciersReport.efi.actif.length"
-                @click="exportToCsv(etatsFinanciersReport.efi.actif, 'etats_financiers_actif')"
-                class="px-4 py-2 bg-blue-600 text-white rounded-md shadow-md hover:bg-blue-700 transition-colors">
-                📊 Actif (CSV)
-              </button>
-              <button v-if="etatsFinanciersReport.efi?.passif && etatsFinanciersReport.efi.passif.length"
-                @click="exportToCsv(etatsFinanciersReport.efi.passif, 'etats_financiers_passif')"
-                class="px-4 py-2 bg-green-600 text-white rounded-md shadow-md hover:bg-green-700 transition-colors">
-                📊 Passif (CSV)
-              </button>
-              <button v-if="etatsFinanciersReport.efi?.pnl && etatsFinanciersReport.efi.pnl.length"
-                @click="exportToCsv(etatsFinanciersReport.efi.pnl, 'etats_financiers_pnl')"
-                class="px-4 py-2 bg-purple-600 text-white rounded-md shadow-md hover:bg-purple-700 transition-colors">
-                📊 Résultat (CSV)
-              </button>
-            </div>
-
-            <!-- Navigation par onglets -->
-            <div class="border-b border-gray-200">
-              <nav class="-mb-px flex space-x-8">
-                <button @click="selectedEfiTab = 'actif'" :class="[
-                  'py-2 px-1 border-b-2 font-medium text-sm',
-                  selectedEfiTab === 'actif'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                ]">
-                  Actifs
-                </button>
-                <button @click="selectedEfiTab = 'passif'" :class="[
-                  'py-2 px-1 border-b-2 font-medium text-sm',
-                  selectedEfiTab === 'passif'
-                    ? 'border-green-500 text-green-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                ]">
-                  Passifs
-                </button>
-                <button @click="selectedEfiTab = 'pnl'" :class="[
-                  'py-2 px-1 border-b-2 font-medium text-sm',
-                  selectedEfiTab === 'pnl'
-                    ? 'border-purple-500 text-purple-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                ]">
-                  Compte de résultat
-                </button>
-              </nav>
-            </div>
-
-            <!-- Contenu des onglets -->
-            <div class="mt-4">
-              <!-- Onglet Actif -->
-              <div v-if="selectedEfiTab === 'actif' && etatsFinanciersReport.efi?.actif">
-                <h4 class="text-lg font-semibold mb-3 text-blue-800">Bilan Actif</h4>
-                <div class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gradient-to-r from-blue-ycube to-blue-ycube-1">
-                      <tr>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">REF
-                        </th>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                          Intitulé</th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">BRUT
-                          N</th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">AMORT
-                          N</th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET N
-                        </th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET
-                          N-1</th>
-                      </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                      <tr v-for="(item, index) in etatsFinanciersReport.efi.actif" :key="index" :class="[
-                        item.ref === 'BZ' ? 'bg-gradient-to-r from-blue-100 to-indigo-100 border-t-2 border-blue-500 font-bold' : 'hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50',
-                        'transition-all duration-300 group transform hover:scale-[1.01] hover:shadow-md'
-                      ]">
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="flex items-center">
-                            <div
-                              class="flex-shrink-0 h-8 w-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center mr-3 group-hover:scale-110 transition-transform duration-200">
-                              <span class="text-xs font-bold text-white">{{ item.ref.charAt(0) }}</span>
-                            </div>
-                            <div :class="[
-                              'text-sm font-mono',
-                              item.ref === 'BZ' ? 'font-extrabold text-blue-900' : 'font-bold text-gray-900 group-hover:text-blue-700'
-                            ]">{{ item.ref }}</div>
-                          </div>
-                        </td>
-                        <td class="px-6 py-4">
-                          <div :class="[
-                            'text-sm max-w-xs truncate',
-                            item.ref === 'BZ' ? 'font-bold text-blue-900' : 'text-gray-900 group-hover:text-blue-700'
-                          ]" :title="item.libelle">{{ item.libelle }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div :class="[
-                            'text-sm font-mono',
-                            item.ref === 'BZ' ? 'font-bold text-blue-900' : 'text-gray-900 group-hover:text-blue-700'
-                          ]">{{ (item.brut_solde_n || 0).toLocaleString() }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div :class="[
-                            'text-sm font-mono',
-                            item.ref === 'BZ' ? 'font-bold text-blue-900' : 'text-gray-900 group-hover:text-blue-700'
-                          ]">{{ (item.amor_solde_n || 0).toLocaleString() }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div :class="[
-                            'text-sm font-mono',
-                            item.ref === 'BZ' ? 'font-extrabold text-blue-900' : 'font-semibold text-gray-900 group-hover:text-blue-700'
-                          ]">{{ (item.net_solde_n || 0).toLocaleString() }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div :class="[
-                            'text-sm font-mono',
-                            item.ref === 'BZ' ? 'font-bold text-blue-900' : 'text-gray-900 group-hover:text-blue-700'
-                          ]">{{ (item.net_solde_n1 || 0).toLocaleString() }}</div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Onglet Passif -->
-              <div v-if="selectedEfiTab === 'passif' && etatsFinanciersReport.efi?.passif">
-                <h4 class="text-lg font-semibold mb-3 text-green-800">Bilan Passif</h4>
-                <div class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gradient-to-r from-blue-ycube to-blue-ycube-1">
-                      <tr>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">REF
-                        </th>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                          Intitulé</th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET N
-                        </th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET
-                          N-1</th>
-                      </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                      <tr v-for="(item, index) in etatsFinanciersReport.efi.passif" :key="index"
-                        class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-300 group transform hover:scale-[1.01] hover:shadow-md">
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="flex items-center">
-                            <div
-                              class="flex-shrink-0 h-8 w-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg flex items-center justify-center mr-3 group-hover:scale-110 transition-transform duration-200">
-                              <span class="text-xs font-bold text-white">{{ item.ref.charAt(0) }}</span>
-                            </div>
-                            <div
-                              class="text-sm font-mono font-bold text-gray-900 group-hover:text-green-700 transition-colors duration-200">
-                              {{ item.ref }}</div>
-                          </div>
-                        </td>
-                        <td class="px-6 py-4">
-                          <div
-                            class="text-sm text-gray-900 max-w-xs truncate group-hover:text-green-700 transition-colors duration-200"
-                            :title="item.libelle">{{ item.libelle }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div
-                            class="text-sm font-mono font-semibold text-gray-900 group-hover:text-green-700 transition-colors duration-200">
-                            {{ (item.net_solde_n || 0).toLocaleString() }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div
-                            class="text-sm font-mono text-gray-900 group-hover:text-green-700 transition-colors duration-200">
-                            {{
-                              (item.net_solde_n1 || 0).toLocaleString() }}</div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Onglet Compte de résultat -->
-              <div v-if="selectedEfiTab === 'pnl' && etatsFinanciersReport.efi?.pnl">
-                <h4 class="text-lg font-semibold mb-3 text-purple-800">Compte de résultat</h4>
-                <div class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gradient-to-r from-blue-ycube to-blue-ycube-1">
-                      <tr>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">REF
-                        </th>
-                        <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">
-                          Intitulé</th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET N
-                        </th>
-                        <th class="px-6 py-4 text-right text-xs font-semibold text-white uppercase tracking-wider">NET
-                          N-1</th>
-                      </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                      <tr v-for="(item, index) in etatsFinanciersReport.efi.pnl" :key="index"
-                        class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 transition-all duration-300 group transform hover:scale-[1.01] hover:shadow-md">
-                        <td class="px-6 py-4 whitespace-nowrap">
-                          <div class="flex items-center">
-                            <div
-                              class="flex-shrink-0 h-8 w-8 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center mr-3 group-hover:scale-110 transition-transform duration-200">
-                              <span class="text-xs font-bold text-white">{{ item.ref.charAt(0) }}</span>
-                            </div>
-                            <div
-                              class="text-sm font-mono font-bold text-gray-900 group-hover:text-purple-700 transition-colors duration-200">
-                              {{ item.ref }}</div>
-                          </div>
-                        </td>
-                        <td class="px-6 py-4">
-                          <div
-                            class="text-sm text-gray-900 max-w-xs truncate group-hover:text-purple-700 transition-colors duration-200"
-                            :title="item.libelle">{{ item.libelle }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div
-                            class="text-sm font-mono font-semibold text-gray-900 group-hover:text-purple-700 transition-colors duration-200">
-                            {{ (item.net_solde_n || 0).toLocaleString() }}</div>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-right">
-                          <div
-                            class="text-sm font-mono text-gray-900 group-hover:text-purple-700 transition-colors duration-200">
-                            {{ (item.net_solde_n1 || 0).toLocaleString() }}</div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        
 
         <!-- Étape 6: Calcul matérialités -->
         <div v-if="componentKey === 'materialite'">
@@ -3579,7 +3418,7 @@ function formatAmount(value) {
               <!-- Calcul du seuil de signification -->
               <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
                 <h4 class="text-base font-semibold text-gray-800 mb-3">Calcul du seuil</h4>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
                   <div>
                     <label class="block text-sm font-semibold text-gray-700 mb-1">Choisir benchmark</label>
                     <select v-model="selectedBench"
@@ -3617,9 +3456,16 @@ function formatAmount(value) {
                     </div>
                   </div>
 
-                  <div class="flex items-end">
+                  <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1">Commantaire</label>
+                    <input
+                      class="w-full px-3 py-2 border-2 border-blue-500 rounded-md focus:outline-none focus:border-blue-600"
+                      type="text" placeholder="Entrez un commentaire...">
+                  </div>
+
+                  <div class="mt-6">
                     <button @click="validerSeuil"
-                      class="w-full btn-primary text-white py-2 px-4 rounded-md font-semibold"
+                      class="w-full btn-primary text-white px-3 py-2 rounded-md font-semibold"
                       :disabled="!selectedBench || !bench.factor || (selectedBench === 'autre' && (!bench.custom_label || !bench.custom_balance))">
                       ✅ Valider
                     </button>
@@ -4137,8 +3983,8 @@ function formatAmount(value) {
             <!-- Tableau de présentation -->
             <div
               v-if="presentationComptesSignificatifsReport.presentation && presentationComptesSignificatifsReport.presentation.length"
-              class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100">
-              <table class="min-w-full divide-y divide-gray-200">
+              class="overflow-x-auto rounded-xl shadow-xl bg-white border border-gray-100">
+              <table class="min-w-full divide-y divide-gray-200 overflow-auto">
                 <thead class="bg-gradient-to-r from-blue-ycube  to-blue-ycube-3">
                   <tr>
                     <th class="px-6 py-4 text-left text-xs font-semibold text-white uppercase tracking-wider">Compte
@@ -4381,7 +4227,7 @@ function formatAmount(value) {
 
             <!-- Tableau de revue analytique -->
             <div v-if="revueAnalytiqueFinaleReport.revue && revueAnalytiqueFinaleReport.revue.length"
-              class="overflow-hidden rounded-xl shadow-xl bg-white border border-gray-100">
+              class="overflow-x-auto rounded-xl shadow-xl bg-white border border-gray-100">
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-600">
                   <tr>

@@ -8,11 +8,13 @@ const props = defineProps(['clientId'])
 const notyf = useNotyf()
 
 const field = ref({
-    date_debut: "",
-    date_fin: "",
-    annee_auditee: "",
-    mandat: ""
-});
+  date_debut: "",
+  date_fin: "",
+  annee_auditee: "",
+  date_debut_mandat: "",
+  date_fin_mandat: ""
+})
+
 const selectedFile = ref([])
 
 onMounted(() => {
@@ -39,7 +41,7 @@ function addBalance() {
 async function addMission() {
     // validation simple: 2 fichiers requis (N puis N-1)
     const files = (selectedFile.value || []).filter(f => !!f && (f.name || f.size !== undefined))
-    if (files.length !== 2) {
+    if (files.length != 2) {
         notyf.trigger("Téléversez exactement 2 fichiers: d'abord la balance N, puis la balance N-1", 'info')
         return
     }
@@ -57,7 +59,7 @@ async function addMission() {
         return
     }
 
-    const result = await uploadFile(field.value.annee_auditee, files, field.value.date_debut, field.value.date_fin, props.clientId)
+    const result = await uploadFile(field.value.annee_auditee, files, field.value.date_debut, field.value.date_fin, field.value.date_debut_mandat, field.value.date_fin_mandat, props.clientId)
     if (result && result._id) {
         notyf.trigger("Mission ajouté avec succès", "success")
         back()
@@ -67,7 +69,7 @@ async function addMission() {
 }
 
 function back() {
-    router.push(`/client/${props.clientId}`)
+    router.back()
 }
 </script>
 
@@ -116,12 +118,18 @@ function back() {
                     </div>
                 </div>
 
-                <div class="w-full">
-                    <label for="" class="text-xs uppercase font-bold">Mandat</label>
-                    <input v-model="field.mandat" type="text"
-                        class="w-full border-2 border-blue-ycube rounded-lg pl-2 focus:outline-none focus:ring-0 h-10"
-                        placeholder="Ex: 2021-2030">
-                </div>
+                <div class="flex space-x-6">
+  <div class="w-1/2">
+    <label class="text-xs uppercase font-bold">Début du mandat</label>
+    <input v-model="field.date_debut_mandat" type="date" class="input" />
+  </div>
+
+  <div class="w-1/2">
+    <label class="text-xs uppercase font-bold">Fin du mandat</label>
+    <input v-model="field.date_fin_mandat" type="date" class="input" />
+  </div>
+</div>
+
 
                 <div v-if="selectedFile[0]" class="flex flex-col space-y-3">
                     <div v-for="n in selectedFile.length - 1" :key="n"

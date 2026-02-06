@@ -1,14 +1,31 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import router from '@/router';
 
-
-// Fausses données en attente de la configuration du backend
 const userProfile = ref({
-  nom: 'Joe DOE',
-  email: 'joe.doe@example.com',
-  role: 'Auditeur CAC',
+  nom: '',
+  email: '',
+  role: '',
   avatar: '👤'
+})
+
+onMounted(async () => {
+  const storedUser = sessionStorage.getItem('user')
+
+  if (storedUser) {
+    const user = JSON.parse(storedUser)
+
+    userProfile.value.nom = `${user.firstname} ${user.lastname}`
+    userProfile.value.role = user.role
+    userProfile.value.email = user.email
+  }
+
+  // Ajout d'un listener global pour fermer les menus au clic en dehors
+  window.addEventListener('click', handleOutsideClick)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', handleOutsideClick)
 })
 
 const notifications = ref([
@@ -22,19 +39,32 @@ const showProfileMenu = ref(false)
 
 const unreadCount = notifications.value.filter(n => !n.lu).length
 
-function toggleNotifications() {
+function toggleNotifications(event) {
+  event.stopPropagation()
   showNotifications.value = !showNotifications.value
   showProfileMenu.value = false
 }
 
-function toggleProfileMenu() {
+function toggleProfileMenu(event) {
+  event.stopPropagation()
   showProfileMenu.value = !showProfileMenu.value
   showNotifications.value = false
 }
 
+function handleOutsideClick() {
+  showNotifications.value = false
+  showProfileMenu.value = false
+}
+
 function logout() {
-  localStorage.removeItem('token')
+  sessionStorage.removeItem('token')
+  sessionStorage.removeItem('user')
   router.push('/connexion')
+}
+
+function profile() {
+  showProfileMenu.value = false
+  router.push('/profile')
 }
 
 function markAsRead(notificationId) {
@@ -50,9 +80,11 @@ function markAllAsRead() {
 </script>
 
 <template>
-  <header class="m-8 flex justify-between items-center bg-blanc3 px-6 py-4 rounded-lg shadow-sm">
+  <header class="flex justify-between items-center bg-blanc3 px-6 py-4 rounded-lg shadow-sm">
     <!-- Logo -->
-    <img src="../assets/logo_y3.png" alt="Logo" class="h-14" />
+     <button @click="router.push('/')">
+       <img src="../assets/logo_y3.png" alt="Logo" class="h-14" />
+     </button>
 
     <!-- Profil et Notifications -->
     <div class="profil flex items-center gap-6">
@@ -73,7 +105,7 @@ function markAllAsRead() {
             class="fixed top-20 right-12 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
             <div class="p-4 border-b border-gray-100">
               <h3 class="font-semibold text-gray-800">Notifications ({{ unreadCount }})</h3>
-              <button @click="toggleNotifications" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600">
+              <button @click="showNotifications = false" class="absolute top-2 right-2 text-gray-400 hover:text-gray-600">
                 <i class="fa-solid fa-times text-lg"></i>
               </button>
             </div>
@@ -114,7 +146,7 @@ function markAllAsRead() {
         <button @click="toggleProfileMenu"
           class="flex items-center gap-3 hover:bg-gray-100 px-3 py-2 rounded-lg transition focus:outline-none">
           <div
-            class="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-lg font-semibold">
+            class="w-10 h-10 bg-blue-ycube rounded-full flex items-center justify-center text-white text-lg font-semibold">
             {{ userProfile.nom.charAt(0) }}
           </div>
           <div class="text-left">
@@ -128,23 +160,30 @@ function markAllAsRead() {
         <Teleport to="body">
           <div v-if="showProfileMenu"
             class="fixed top-20 right-4 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-            <div class="p-4 border-b border-gray-100">
-              <p class="text-sm font-semibold text-gray-800">{{ userProfile.nom }}</p>
-              <p class="text-xs text-gray-500">{{ userProfile.email }}</p>
+            <div class="p-4 border-b border-gray-100 flex justify-between items-start">
+              <div>
+                <p class="text-sm font-semibold text-gray-800">{{ userProfile.nom }}</p>
+                <p class="text-xs text-gray-500">{{ userProfile.email }}</p>
+              </div>
+              <button @click="showProfileMenu = false" class="text-gray-400 hover:text-gray-600">
+                <i class="fa-solid fa-times"></i>
+              </button>
             </div>
 
             <div class="p-3 space-y-2">
-              <button
+              <button @click="profile"
                 class="w-full text-left text-sm text-gray-700 hover:bg-gray-100 px-3 py-2 rounded transition flex items-center gap-2">
                 <i class="fa-solid fa-user text-gray-500"></i>
                 Mon profil
               </button>
               <button
+                @click="showProfileMenu = false"
                 class="w-full text-left text-sm text-gray-700 hover:bg-gray-100 px-3 py-2 rounded transition flex items-center gap-2">
                 <i class="fa-solid fa-cog text-gray-500"></i>
                 Paramètres
               </button>
               <button
+                @click="showProfileMenu = false"
                 class="w-full text-left text-sm text-gray-700 hover:bg-gray-100 px-3 py-2 rounded transition flex items-center gap-2">
                 <i class="fa-solid fa-question-circle text-gray-500"></i>
                 Aide
@@ -153,7 +192,7 @@ function markAllAsRead() {
 
             <div class="p-3 border-t border-gray-100">
               <button
-              @click="logout"
+                @click="logout"
                 class="w-full text-left text-sm text-red-600 hover:bg-red-50 px-3 py-2 rounded transition flex items-center gap-2 font-medium">
                 <i class="fa-solid fa-sign-out-alt"></i>
                 Déconnexion

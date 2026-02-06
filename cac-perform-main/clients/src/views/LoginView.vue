@@ -22,7 +22,7 @@
           <label class="uppercase font-semibold text-[#022a41]">Email</label>
           <input
             type="text"
-            v-model="username"
+            v-model="email"
             placeholder="Saisir l'email..."
             class="p-3 w-full border-2 border-[#022a41] rounded-xl bg-transparent text-[#022a41] placeholder:italic focus:outline-none"
           />
@@ -45,40 +45,51 @@
       >
         Se connecter
       </button>
+
+      <p class="mt-6 text-sm text-gray-600">
+        Pas encore de compte ?
+        <span @click="router.push('/inscription')" class="text-blue-ycube cursor-pointer font-semibold">
+          S'inscrire
+        </span>
+      </p>
     </main>
 
   </div>
 </template>
 
-  
 <script setup>
-import { ref, inject } from 'vue';
-const axios = inject('axios')
-import { useNotyf } from '@/composables/useNotyf';
-import router from '@/router';
-const notyf = useNotyf();
+import { ref } from 'vue'
+import { useNotyf } from '@/composables/useNotyf'
+import router from '@/router'
+import { login as loginApi } from '@/api/auth.api'
 
-const username = ref("")
-const password = ref("")
+const notyf = useNotyf()
+
+const email = ref('')
+const password = ref('')
 
 async function login() {
   try {
-    if (!username.value || !password.value) {
+    if (!email.value || !password.value) {
       notyf.trigger("Veuillez renseigner l'email et le mot de passe", "warning")
       return
     }
 
-    const payload = { mail: username.value, pwd: password.value }
-    const { data } = await axios.post('/manager/connexion/', payload)
+    const payload = {
+      email: email.value,
+      password: password.value,
+    }
 
-    if (data?.token) {
-      localStorage.setItem('token', data.token)
+    const user = await loginApi(payload)
+
+    if (user) {
       notyf.trigger("Connexion réussie", "success")
       router.push('/')
     } else {
       notyf.trigger("Identifiants invalides", "error")
     }
   } catch (e) {
+    console.error(e)
     notyf.trigger("Identifiants invalides", "error")
   }
 }

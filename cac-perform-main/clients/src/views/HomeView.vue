@@ -15,17 +15,26 @@ const clientToDelete = ref(null)
 const isDeleting = ref(false)
 const route = useRoute()
 
-// Profil + Notifs (tu pourras les remplacer plus tard)
 const userProfile = ref({
-  nom: 'Axelle AMANI',
-  role: 'Manager Audit'
+  nom: '',
+  role: ''
 })
-const unreadNotifications = ref(3)
 
 onMounted(async () => {
+  const storedUser = sessionStorage.getItem('user')
+
+  if (storedUser) {
+    const user = JSON.parse(storedUser)
+
+    userProfile.value.nom = `${user.firstname} ${user.lastname}`
+    userProfile.value.role = user.role
+  }
+
   await loadClients()
   await loadMissions()
 })
+const unreadNotifications = ref(3)
+
 
 async function loadClients() {
   try {
@@ -59,7 +68,8 @@ function newClient() {
 }
 
 function logout() {
-  localStorage.removeItem('token')
+  sessionStorage.removeItem('token')
+  sessionStorage.removeItem('user')
   router.push('/connexion')
 }
 
@@ -108,11 +118,11 @@ async function deleteClient() {
 </script>
 
 <template>
-  <div class="w-full h-screen flex bg-[#f5f7fa] overflow-hidden">
+  <div class="flex w-full overflow-hidden">
 
     <!-- SIDEBAR GAUCHE -->
     <!-- SIDEBAR GAUCHE -->
-<aside class="w-72 bg-blue-ycube text-white flex flex-col px-6 py-8">
+<aside class="w-72 shrink-0 bg-blue-ycube text-white flex flex-col px-6 py-8">
 
   <!-- Logo -->
   <div class="flex items-center gap-3 mb-10">
@@ -210,11 +220,11 @@ async function deleteClient() {
 
 
     <!-- CONTENU DASHBOARD -->
-    <main class="flex-1 overflow-y-auto p-10 flex flex-col gap-10">
+    <main class="flex-1 overflow-y-auto p-6 lg:p-10 flex flex-col gap-10">
 
       <!-- BARRE DE RECHERCHE -->
       <div class="flex justify-end">
-        <div class="flex items-center bg-white px-4 py-2 w-1/3 rounded-lg shadow">
+        <div class="flex items-center bg-white px-4 py-2 w-full sm:w-2/3 lg:w-1/3 rounded-lg shadow">
           <i class="fa-solid fa-magnifying-glass text-gray-500 mr-3"></i>
           <input
             v-model="searchQuery"
@@ -226,7 +236,7 @@ async function deleteClient() {
       </div>
 
       <!-- CARDS (stats) -->
-      <div class="grid grid-cols-2 gap-8">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 lg:gap-8">
 
         <div class="bg-white rounded-lg shadow p-6 text-center">
           <p class="text-4xl font-bold text-blue-ycube">{{ listClients.length }}</p>

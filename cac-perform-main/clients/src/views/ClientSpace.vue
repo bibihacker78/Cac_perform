@@ -69,17 +69,20 @@ const filteredMissions = computed(() => {
 });
 
 
-function seeMore(missionId, event) {
+function seeMore(mission, event) {
     if (event) {
         event.stopPropagation()
     }
-    if (!missionId) {
+    if (!mission?._id) {
         console.error("❌ ID de mission manquant")
         notyf.trigger("Erreur: ID de mission manquant", "error")
         return
     }
-    console.log("🔍 Navigation vers la mission:", missionId)
-    router.push(`/grouping-analyse/${missionId}`)
+    console.log("🔍 Navigation vers la mission:", mission._id)
+    router.push({
+      path: `/grouping-analyse/${mission._id}`,
+      query: { annee: mission.annee_auditee }
+    })
 }
 
 function back() {
@@ -128,7 +131,7 @@ async function deleteMission() {
 </script>
 
 <template>
-  <div class="h-screen w-screen bg-gray-100 flex flex-col overflow-hidden">
+  <div class="flex flex-col w-full overflow-hidden">
 
     <!-- HEADER -->
     <div class="bg-white shadow-sm px-6 py-4 flex items-center justify-between">
@@ -276,7 +279,7 @@ async function deleteMission() {
 
                   <button
                     class="px-4 py-1 bg-blue-ycube text-white rounded hover:bg-blue-700 text-xs"
-                    @click.stop="seeMore(mission._id)"
+                    @click.stop="seeMore(mission)"
                   >
                     Voir
                   </button>

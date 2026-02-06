@@ -1,76 +1,135 @@
 <script setup>
-import { ref, h, onMounted, inject } from 'vue';
-import GroupingInitial from './GroupingInitial.vue';
-import { useNotyf } from '@/composables/useNotyf';
+import { ref, onMounted, inject, shallowRef, watch } from 'vue'
+import GroupingInitial from './GroupingInitial.vue'
+import GroupingActif from './GroupingActif.vue'
+import GroupingPassif from './GroupingPassif.vue'
+import GroupingPnl from './GroupingPnl.vue'
+import { useNotyf } from '@/composables/useNotyf'
+
 const notif = useNotyf()
-const props = defineProps(['data'])
 const axios = inject('axios')
-const selectedValue = ref('')
-const componentKey = ref('')
-const renderComponent = ref()
 
-// Recuperer l'id mission dans l'URL
-const id_mission = window.location.pathname.split('/')[2]
-
-onMounted(()=>{
-    console.log('📊 GroupingComponent - Données reçues:', props.data)
-    // Afficher 'init' par défaut
-    if (props.data && props.data.grouping) {
-        showComp('init');
-    }
+const props = defineProps ({
+  data: {
+    type: [Object, Array],
+    default: () => ({})
+  },
+  annee_auditee: {
+    type: [String, Number],
+    default: null
+  }
 })
 
-function showComp(type) {
-    let vnode;
-    selectedValue.value = type
 
-    if (type === 'init') {
-        const subProps = {
-            grouping: props.data.grouping,
-            annee_auditee: props.data.annee_auditee
-        }
-        vnode = h(GroupingInitial, subProps)
-    }
-    renderComponent.value = vnode;
-    componentKey.value = type;
+
+const activeTab = ref('init')
+const currentComponent = shallowRef(GroupingInitial)
+
+// ✅ SOURCE UNIQUE
+const grouping = ref([])
+
+// Recuperer l'id mission
+const id_mission = window.location.pathname.split('/')[2]
+
+function syncGrouping(nextGrouping) {
+  if (!Array.isArray(nextGrouping)) {
+    console.warn('❌ GroupingComponent sans données valides', props.data)
+    return
+  }
+  grouping.value = nextGrouping
+  if (!activeTab.value) showComp('init')
+}
+
+onMounted(() => {
+  syncGrouping(props.data?.grouping)
+})
+
+watch(
+  () => props.data?.grouping,
+  (next) => {
+    if (next) syncGrouping(next)
+  },
+  { deep: false }
+)
+
+
+
+function showComp(type) {
+  activeTab.value = type
+
+  if (type === 'init') currentComponent.value = GroupingInitial
+  if (type === 'actif') currentComponent.value = GroupingActif
+  if (type === 'passif') currentComponent.value = GroupingPassif
+  if (type === 'pnl') currentComponent.value = GroupingPnl
 }
 
 async function downloadGrouping() {
-    const isTelechargeable = props.data.grouping[0]
-    if (isTelechargeable.mat_sign) {
-        const response = await axios.get(`/mission/download_grouping/${id_mission}`, {responseType:'blob'})
-        if (response.data) {
-            const url = window.URL.createObjectURL(new Blob([response.data]))
-            const link = document.createElement('a')
-            link.href = url
+  if (!grouping.value.length) return
 
-            link.setAttribute('download', 'grouping.xlsx')
+  if (grouping.value[0]?.mat_sign) {
+    const response = await axios.get(
+      `/mission/download_grouping/${id_mission}`,
+      { responseType: 'blob' }
+    )
 
-            document.body.appendChild(link)
-            link.click()
-
-            window.URL.revokeObjectURL(url)
-        } else {
-            console.error('Erreur lors du téléchargement du fichier');
-            notif.trigger('Erreur lors du téléchargement du fichier', 'error')
-        }
-    } else {
-        notif.trigger('Impossible de télécharger car le grouping est incomplet', 'error')
-    }
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', 'grouping.xlsx')
+    document.body.appendChild(link)
+    link.click()
+    window.URL.revokeObjectURL(url)
+  } else {
+    notif.trigger('Impossible de télécharger car le grouping est incomplet', 'error')
+  }
 }
 </script>
 
+
 <template>
     <div class="h-full w-full flex flex-col space-y-2 overflow-auto">
-        <div class="min-h-10 flex space-x-3 px-4 pt-2 items-center">
-            <button class="w-[250px] h-8 bg-blue-ycube text-white rounded-md shadow-md" :class="{'bg-green-ycube transition-all ease-in-out duration-300': selectedValue === 'init'}" @click="showComp('init')">Grouping Initial</button>
-            <button class="w-[250px] h-8 bg-blue-ycube text-white rounded-md shadow-md" @click="downloadGrouping">Télécharger le grouping</button>
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            <button @click="showComp('init')" :class="[
+                'w-full px-3 py-2 text-white rounded-md shadow-md transition-all duration-300',
+                activeTab === 'init' ? 'bg-green-ycube' : 'bg-blue-ycube'
+            ]">
+                Grouping Initial
+            </button>
+
+            <button @click="showComp('actif')" :class="[
+                'w-full px-3 py-2 text-white rounded-md shadow-md transition-all duration-300',
+                activeTab === 'actif' ? 'bg-green-ycube' : 'bg-blue-ycube'
+            ]">
+                Actifs
+            </button>
+
+            <button @click="showComp('passif')" :class="[
+                'w-full px-3 py-2 text-white rounded-md shadow-md transition-all duration-300',
+                activeTab === 'passif' ? 'bg-green-ycube' : 'bg-blue-ycube'
+            ]">
+                Passifs
+            </button>
+
+            <button @click="showComp('pnl')" :class="[
+                'w-full px-3 py-2 text-white rounded-md shadow-md transition-all duration-300',
+                activeTab === 'pnl' ? 'bg-green-ycube' : 'bg-blue-ycube'
+            ]">
+                Compte de résultat
+            </button>
+
+            <button class="w-full px-3 py-2 bg-blue-ycube text-white rounded-md shadow-md"
+                @click="downloadGrouping">Télécharger le grouping</button>
         </div>
 
         <!--  -->
         <div class="flex-auto flex flex-col overflow-visible">
-            <div class="w-full h-full flex flex-col overflow-visible">
-                <component :is="renderComponent" :key="componentKey" />
+            <div class="w-full px-3 py-2 h-full flex flex-col overflow-visible">
+                <component
+  :is="currentComponent"
+  :grouping="grouping"
+  :annee_auditee="annee_auditee"
+/>
+
             </div>
         </div>
     </div>
